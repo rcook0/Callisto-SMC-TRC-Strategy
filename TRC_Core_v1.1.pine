@@ -1,4 +1,17 @@
 //@version=5
+
+// HTF bias via 4H/1H/15M (simple MA proxy for now).
+
+// Incremental 5M structure with:
+
+// BOS (continuation)
+
+// CHoCH (reversal) using last HL/LH
+
+// TRC-style retest entry after CHoCH in direction of HTF bias.
+
+// A small retest “zone box” visual so you can see the C in TRC.
+
 indicator("TRC Core v1.1 - CHoCH + Retest", overlay=true,
      max_lines_count=500, max_labels_count=500, max_boxes_count=50)
 

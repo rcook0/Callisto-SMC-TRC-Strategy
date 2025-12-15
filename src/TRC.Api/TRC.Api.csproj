@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="..\TRC.App\TRC.App.csproj" />
+    <ProjectReference Include="..\TRC.Domain\TRC.Domain.csproj" />
+    <ProjectReference Include="..\TRC.Infra.MarketData\TRC.Infra.MarketData.csproj" />
+    <ProjectReference Include="..\TRC.Infra.Execution\TRC.Infra.Execution.csproj" />
+    <ProjectReference Include="..\TRC.Infra.Data\TRC.Infra.Data.csproj" />
+  </ItemGroup>
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+</Project>

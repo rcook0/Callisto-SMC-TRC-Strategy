@@ -1,0 +1,64 @@
+@page "/backtests"
+@inject IHttpClientFactory ClientFactory
+
+<h2>Backtests (scaffold)</h2>
+
+<div class="card">
+  <div class="row">
+    <label>CSV path (server)</label>
+    <input @bind="CsvPath" placeholder="C:\data\sample_5m.csv" />
+  </div>
+  <div class="row">
+    <label>Symbol</label>
+    <input @bind="Symbol" placeholder="XAUUSD" />
+  </div>
+  <div class="row">
+    <label>Output directory</label>
+    <input @bind="OutDir" placeholder="out" />
+  </div>
+
+  <button @onclick="Run">Run backtest</button>
+</div>
+
+@if (Result is not null)
+{
+  <pre>@System.Text.Json.JsonSerializer.Serialize(Result, new System.Text.Json.JsonSerializerOptions { WriteIndented = true })</pre>
+}
+
+@if (!string.IsNullOrWhiteSpace(Error))
+{
+  <p class="error">@Error</p>
+}
+
+@code {
+  private string CsvPath { get; set; } = "";
+  private string Symbol { get; set; } = "XAUUSD";
+  private string OutDir { get; set; } = "out";
+  private object? Result { get; set; }
+  private string Error { get; set; } = "";
+
+  private async Task Run()
+  {
+    Error = "";
+    Result = null;
+
+    try
+    {
+      var client = ClientFactory.CreateClient("trcApi");
+      var payload = new { csvPath = CsvPath, symbol = Symbol, outDir = OutDir };
+
+      var resp = await client.PostAsJsonAsync("/backtests/run", payload);
+      if (!resp.IsSuccessStatusCode)
+      {
+        Error = $"API error: {resp.StatusCode}";
+        return;
+      }
+
+      Result = await resp.Content.ReadFromJsonAsync<object>();
+    }
+    catch (Exception ex)
+    {
+      Error = ex.Message;
+    }
+  }
+}

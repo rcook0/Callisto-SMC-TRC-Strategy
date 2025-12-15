@@ -8,7 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\TRC.Core\TRC.Core.csproj" />
+    <ProjectReference Include="..\TRC_Core\TRC.Core.csproj" />
   </ItemGroup>
 
 </Project>

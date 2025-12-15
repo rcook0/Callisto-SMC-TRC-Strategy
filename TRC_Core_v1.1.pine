@@ -1,0 +1,251 @@
+//@version=5
+indicator("TRC Core v1.1 - CHoCH + Retest", overlay=true,
+     max_lines_count=500, max_labels_count=500, max_boxes_count=50)
+
+//────────────────────────────────────
+// Inputs
+//────────────────────────────────────
+tfHTF1       = input.timeframe("240", "Higher TF #1 (4H)")
+tfHTF2       = input.timeframe("60",  "Higher TF #2 (1H)")
+tfHTF3       = input.timeframe("15",  "Higher TF #3 (15m)")
+htfMaLen     = input.int(50, "HTF MA length", minval=1)
+maxRetestBars = input.int(20, "Max 5m bars to wait for retest", minval=1, maxval=200)
+
+showBOS         = input.bool(true,  "Show BOS markers")
+showCHoCH       = input.bool(true,  "Show CHoCH markers")
+showRetestSig   = input.bool(true,  "Show TRC retest entries")
+showRetestBoxes = input.bool(true,  "Show retest zone boxes")
+
+//────────────────────────────────────
+// Higher timeframe bias (2-of-3)
+//────────────────────────────────────
+htfBias(tf) =>
+    c = request.security(syminfo.tickerid, tf, close)
+    m = request.security(syminfo.tickerid, tf, ta.sma(close, htfMaLen))
+    c > m ? 1 : c < m ? -1 : 0
+
+b1 = htfBias(tfHTF1)
+b2 = htfBias(tfHTF2)
+b3 = htfBias(tfHTF3)
+
+biasSum  = b1 + b2 + b3
+htf_bias = biasSum >= 2 ? 1 : biasSum <= -2 ? -1 : 0
+
+// Visual bias tint
+bgcolor(
+     htf_bias == 1 ? color.new(color.green, 90) :
+     htf_bias == -1 ? color.new(color.red,  90) : na
+)
+
+//────────────────────────────────────
+// 5m Structure State Machine
+//────────────────────────────────────
+// trend5m: 1 = bull, -1 = bear, 0 = none
+var int   trend5m      = 0
+var float lastHigh     = na
+var float lastLow      = na
+var float lastHL       = na  // last Higher Low (bull trend)
+var float lastLH       = na  // last Lower High (bear trend)
+var float pendingLow   = na  // candidate low in bull pullback
+var float pendingHigh  = na  // candidate high in bear pullback
+var string structEvent = ""
+
+// Init on first bar
+if bar_index == 0
+    trend5m     := 0
+    lastHigh    := high
+    lastLow     := low
+    lastHL      := na
+    lastLH      := na
+    pendingLow  := na
+    pendingHigh := na
+
+// Reset event every bar
+structEvent := ""
+
+// Bootstrap trend if unset
+if trend5m == 0 and bar_index > 0
+    trend5m := close > close[1] ? 1 : close < close[1] ? -1 : 0
+
+//────────────────────────────────────
+// Structure update: CHoCH first, then BOS / pullback
+//────────────────────────────────────
+if trend5m == 1
+    // Bull trend: check for CHoCH (close below lastHL)
+    if not na(lastHL) and close < lastHL
+        // Bearish CHoCH: bull -> bear
+        trend5m       := -1
+        structEvent   := "CHoCH_DOWN"
+        // Seed bear structure from this bar
+        lastLH        := high
+        lastHigh      := high
+        lastLow       := low
+        pendingHigh   := na
+        pendingLow    := na
+    else
+        // BOS up: new impulse high
+        if high > nz(lastHigh, high)
+            lastHigh    := high
+            if not na(lastLow)
+                lastHL := lastLow
+            pendingLow  := na
+            structEvent := "BOS_UP"
+        // Track deepest pullback since lastHigh
+        if low < nz(pendingLow, low)
+            pendingLow := low
+        // Keep lastLow as overall low anchor
+        if low < nz(lastLow, low)
+            lastLow := low
+
+else if trend5m == -1
+    // Bear trend: check for CHoCH (close above lastLH)
+    if not na(lastLH) and close > lastLH
+        // Bullish CHoCH: bear -> bull
+        trend5m       := 1
+        structEvent   := "CHoCH_UP"
+        // Seed bull structure from this bar
+        lastHL        := low
+        lastLow       := low
+        lastHigh      := high
+        pendingLow    := na
+        pendingHigh   := na
+    else
+        // BOS down: new impulse low
+        if low < nz(lastLow, low)
+            lastLow     := low
+            if not na(lastHigh)
+                lastLH := lastHigh
+            pendingHigh := na
+            structEvent := "BOS_DOWN"
+        // Track highest pullback since lastLow
+        if high > nz(pendingHigh, high)
+            pendingHigh := high
+        // Keep lastHigh as overall high anchor
+        if high > nz(lastHigh, high)
+            lastHigh := high
+
+// Flags for plotting
+isCHoCHUp   = structEvent == "CHoCH_UP"
+isCHoCHDown = structEvent == "CHoCH_DOWN"
+isBOSUp     = structEvent == "BOS_UP"
+isBOSDown   = structEvent == "BOS_DOWN"
+
+//────────────────────────────────────
+// Retest State (TRC C-leg)
+//────────────────────────────────────
+var int   setupDir       = 0    // 1 = long setup, -1 = short setup
+var float zoneLow        = na
+var float zoneHigh       = na
+var int   barsLeft       = 0
+var int   setupBarIndex  = na
+var box   retestBox      = na
+
+// Create setup when CHoCH aligns with HTF bias
+if isCHoCHUp and htf_bias == 1
+    setupDir      := 1
+    zoneLow       := low    // lower bound of CHoCH bar
+    zoneHigh      := close  // body top of CHoCH bar
+    barsLeft      := maxRetestBars
+    setupBarIndex := bar_index
+    // draw new box
+    if showRetestBoxes
+        if not na(retestBox)
+            box.delete(retestBox)
+        retestBox := box.new(bar_index, zoneHigh, bar_index + maxRetestBars, zoneLow,
+                             bgcolor=color.new(color.green, 90),
+                             border_color=color.new(color.green, 0))
+
+if isCHoCHDown and htf_bias == -1
+    setupDir      := -1
+    zoneLow       := close  // body bottom
+    zoneHigh      := high   // upper wick
+    barsLeft      := maxRetestBars
+    setupBarIndex := bar_index
+    // draw new box
+    if showRetestBoxes
+        if not na(retestBox)
+            box.delete(retestBox)
+        retestBox := box.new(bar_index, zoneHigh, bar_index + maxRetestBars, zoneLow,
+                             bgcolor=color.new(color.red, 90),
+                             border_color=color.new(color.red, 0))
+
+// Check for retest + manage expiry
+longRetest  = false
+shortRetest = false
+
+if setupDir != 0
+    // Extend box to current bar
+    if showRetestBoxes and not na(retestBox)
+        box.set_right(retestBox, bar_index)
+
+    if barsLeft > 0
+        barsLeft -= 1
+
+        // Long retest: price trades back into [zoneLow, zoneHigh] after CHoCH bar
+        if setupDir == 1 and bar_index > setupBarIndex
+            if low <= zoneHigh and low >= zoneLow
+                longRetest  := true
+                setupDir    := 0
+                barsLeft    := 0
+                if showRetestBoxes and not na(retestBox)
+                    box.delete(retestBox)
+                    retestBox := na
+
+        // Short retest
+        if setupDir == -1 and bar_index > setupBarIndex
+            if high >= zoneLow and high <= zoneHigh
+                shortRetest := true
+                setupDir    := 0
+                barsLeft    := 0
+                if showRetestBoxes and not na(retestBox)
+                    box.delete(retestBox)
+                    retestBox := na
+
+    // Expire setup if time runs out
+    if barsLeft <= 0 and setupDir != 0
+        setupDir := 0
+        if showRetestBoxes and not na(retestBox)
+            box.delete(retestBox)
+            retestBox := na
+
+//────────────────────────────────────
+// Plotting: BOS / CHoCH / TRC entries
+//────────────────────────────────────
+if showCHoCH
+    plotshape(isCHoCHUp, title="Bullish CHoCH", style=shape.triangleup,
+          location=location.belowbar, color=color.new(color.green, 0),
+          size=size.tiny, text="CH↑")
+
+    plotshape(isCHoCHDown, title="Bearish CHoCH", style=shape.triangledown,
+          location=location.abovebar, color=color.new(color.red, 0),
+          size=size.tiny, text="CH↓")
+
+if showBOS
+    plotshape(isBOSUp, title="Bullish BOS", style=shape.circle,
+          location=location.belowbar, color=color.new(color.green, 60),
+          size=size.tiny, text="B↑")
+
+    plotshape(isBOSDown, title="Bearish BOS", style=shape.circle,
+          location=location.abovebar, color=color.new(color.red, 60),
+          size=size.tiny, text="B↓")
+
+if showRetestSig
+    plotshape(longRetest,  title="TRC Long Retest", style=shape.labelup,
+          location=location.belowbar, color=color.new(color.green, 0),
+          size=size.tiny, text="TRC L")
+
+    plotshape(shortRetest, title="TRC Short Retest", style=shape.labeldown,
+          location=location.abovebar, color=color.new(color.red, 0),
+          size=size.tiny, text="TRC S")
+
+// Label for 5m internal trend
+var label l_trend = na
+if barstate.islast
+    label.delete(l_trend)
+    l_trend := label.new(bar_index, close,
+        trend5m == 1 ? "5m Bullish" :
+        trend5m == -1 ? "5m Bearish" : "5m Neutral",
+        style=label.style_label_left,
+        color=trend5m == 1 ? color.new(color.green, 0) :
+               trend5m == -1 ? color.new(color.red, 0) :
+               color.new(color.gray, 60))

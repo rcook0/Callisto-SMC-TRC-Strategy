@@ -1,0 +1,122 @@
+//@version=5
+indicator("TRC Structure Core v1", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// ──────────────────────────────
+// Parameters
+// ──────────────────────────────
+lengthHTF1   = input.timeframe("240", "Higher TF #1 (e.g. 4H)")
+lengthHTF2   = input.timeframe("60",  "Higher TF #2 (e.g. 1H)")
+lengthHTF3   = input.timeframe("15",  "Higher TF #3 (e.g. 15M)")
+
+// ──────────────────────────────
+// Higher timeframe bias (simple SMA proxy)
+// ──────────────────────────────
+ma(src, len) => ta.sma(src, len)
+
+getBias(tf) =>
+    close_htf = request.security(syminfo.tickerid, tf, close)
+    sma_htf   = request.security(syminfo.tickerid, tf, ma(close, 50))
+    bias = close_htf > sma_htf ? 1 : close_htf < sma_htf ? -1 : 0
+    bias
+
+bias1 = getBias(lengthHTF1)
+bias2 = getBias(lengthHTF2)
+bias3 = getBias(lengthHTF3)
+bias_sum = bias1 + bias2 + bias3
+
+htf_bias = bias_sum >= 2 ? 1 : bias_sum <= -2 ? -1 : 0
+
+// Color for background visual
+bgcolor(htf_bias == 1 ? color.new(color.green, 90) :
+        htf_bias == -1 ? color.new(color.red, 90) : na)
+
+// ──────────────────────────────
+// 5-Minute CHoCH Engine (incremental state machine)
+// ──────────────────────────────
+
+// Maintain state across bars
+var float lastHigh = na
+var float lastLow  = na
+var float lastHL   = na
+var float lastLH   = na
+var int   trend5m  = 0  // 1 = bull, -1 = bear, 0 = none
+var string event   = ""
+
+// Detect new structural highs/lows
+newHigh = high > nz(lastHigh, high)
+newLow  = low  < nz(lastLow,  low)
+
+// Trend initialization
+if na(trend5m) or trend5m == 0
+    trend5m := close > close[1] ? 1 : close < close[1] ? -1 : 0
+    lastHigh := high
+    lastLow  := low
+
+// ──────────────
+// Bullish logic
+// ──────────────
+if trend5m == 1
+    // Continue trend
+    if high > nz(lastHigh)
+        lastHigh := high
+        if not na(lastLow)
+            lastHL := lastLow
+        event := "BOS↑"
+    // Pullback low
+    if low < nz(lastLow)
+        lastLow := low
+    // CHoCH detection
+    if close < nz(lastHL)
+        trend5m := -1
+        lastLH := high
+        event := "CHoCH↓"
+
+// ──────────────
+// Bearish logic
+// ──────────────
+if trend5m == -1
+    if low < nz(lastLow)
+        lastLow := low
+        if not na(lastHigh)
+            lastLH := lastHigh
+        event := "BOS↓"
+    if high > nz(lastHigh)
+        lastHigh := high
+    if close > nz(lastLH)
+        trend5m := 1
+        lastHL := low
+        event := "CHoCH↑"
+
+// ──────────────────────────────
+// Visualization
+// ──────────────────────────────
+plotshape(event == "CHoCH↑", title="Bullish CHoCH", style=shape.triangleup,
+          location=location.belowbar, color=color.new(color.green, 0), size=size.tiny, text="CH↑")
+
+plotshape(event == "CHoCH↓", title="Bearish CHoCH", style=shape.triangledown,
+          location=location.abovebar, color=color.new(color.red, 0), size=size.tiny, text="CH↓")
+
+plotshape(event == "BOS↑", title="Bullish BOS", style=shape.circle,
+          location=location.belowbar, color=color.new(color.green, 60), size=size.tiny, text="B↑")
+
+plotshape(event == "BOS↓", title="Bearish BOS", style=shape.circle,
+          location=location.abovebar, color=color.new(color.red, 60), size=size.tiny, text="B↓")
+
+// Label current internal trend
+var label l_trend = na
+if barstate.islast
+    label.delete(l_trend)
+    l_trend := label.new(bar_index, close, trend5m == 1 ? "5M Bullish" : trend5m == -1 ? "5M Bearish" : "Neutral",
+        style=label.style_label_left,
+        color=trend5m == 1 ? color.new(color.green, 0) : trend5m == -1 ? color.new(color.red, 0) : color.new(color.gray, 50))
+
+// ──────────────────────────────
+// Signal logic (TRC core)
+// ──────────────────────────────
+longSignal  = event == "CHoCH↑" and htf_bias == 1
+shortSignal = event == "CHoCH↓" and htf_bias == -1
+
+plotshape(longSignal,  title="TRC Buy",  style=shape.labelup,   location=location.belowbar,
+          color=color.new(color.green,0), text="BUY", size=size.tiny)
+plotshape(shortSignal, title="TRC Sell", style=shape.labeldown, location=location.abovebar,
+          color=color.new(color.red,0),   text="SELL", size=size.tiny)

@@ -1,3 +1,12 @@
+// One TRCEngine object per symbol/timeframe
+// Feed it bars + HTF bias each step
+// Maintains internal state (trend, lastHL/LH, CHoCH, retest zone)
+// Returns events (BOS, CHOCH, TRC long/short entries) without any charting glue
+
+// Unit-testable logic
+// Integratable into Python backtester / Streamlit UI, MT5/cTrader bridge
+// (Pine “view” that just mirrors the same transitions)
+
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional, List
